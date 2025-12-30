@@ -47,7 +47,6 @@ jobs:
             # Створюємо директорію, якщо її немає
             mkdir -p ~/voting-app
             cd ~/voting-app
-
             # Замінюємо build на image для vote/result/worker
             sed -i "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" docker-compose.yml
             sed -i "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" docker-compose.yml
