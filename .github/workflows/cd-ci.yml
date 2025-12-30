@@ -43,13 +43,14 @@ jobs:
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
 
       # ---------- Prepare docker-compose ----------
-      - name: Prepare docker-compose for production
+      - name: Prepare docker-compose for deployment
         run: |
           sed \
             -e "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" \
             -e "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" \
             -e "s|build: ./worker|image: ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest|" \
-            docker-compose.prod.yml > docker-compose.yml
+            docker-compose.yml > docker-compose.tmp.yml
+          mv docker-compose.tmp.yml docker-compose.yml
 
       # ---------- Setup SSH ----------
       - name: Setup SSH
