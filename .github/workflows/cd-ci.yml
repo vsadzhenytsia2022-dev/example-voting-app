@@ -5,75 +5,65 @@ on:
     branches:
       - main
 
-env:
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-  ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
-  ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
-  VM_HOST: ${{ secrets.VM_IP }}
-  VM_USER: ${{ secrets.VM_USER }}
-  SSH_KEY: ${{ secrets.VM_SSH_KEY }}
-  APP_DIR: /home/${{ secrets.VM_USER }}/voting-app
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------- Checkout ----------
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ---------- Login to ACR ----------
       - name: Login to Azure Container Registry
-        run: echo "${{ env.ACR_PASSWORD }}" | docker login ${{ env.ACR_LOGIN_SERVER }} -u ${{ env.ACR_USERNAME }} --password-stdin
+        run: echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
 
       # ---------- Build & Push vote/result/worker ----------
       - name: Build and Push vote
         run: |
-          docker build -t ${{ env.ACR_LOGIN_SERVER }}/vote:latest ./vote
-          docker push ${{ env.ACR_LOGIN_SERVER }}/vote:latest
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest ./vote
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest
 
       - name: Build and Push result
         run: |
-          docker build -t ${{ env.ACR_LOGIN_SERVER }}/result:latest ./result
-          docker push ${{ env.ACR_LOGIN_SERVER }}/result:latest
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/result:latest ./result
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/result:latest
 
       - name: Build and Push worker
         run: |
-          docker build -t ${{ env.ACR_LOGIN_SERVER }}/worker:latest ./worker
-          docker push ${{ env.ACR_LOGIN_SERVER }}/worker:latest
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest ./worker
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
 
       # ---------- Prepare docker-compose ----------
-      - name: Prepare docker-compose for production
+      - name: Prepare docker-compose
         run: |
-          sed -e "s|build: ./vote|image: ${{ env.ACR_LOGIN_SERVER }}/vote:latest|" \
-              -e "s|build: ./result|image: ${{ env.ACR_LOGIN_SERVER }}/result:latest|" \
-              -e "s|build: ./worker|image: ${{ env.ACR_LOGIN_SERVER }}/worker:latest|" \
+          sed -e "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" \
+              -e "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" \
+              -e "s|build: ./worker|image: ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest|" \
               docker-compose.yml > docker-compose.prod.yml
 
       # ---------- Setup SSH ----------
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ env.SSH_KEY }}" > ~/.ssh/id_rsa
+          echo "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
       # ---------- Create app folder on VM ----------
       - name: Create app directory on VM
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.VM_USER }}@${{ env.VM_HOST }} "mkdir -p $APP_DIR"
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no azureuser@72.146.29.244 "mkdir -p /home/azureuser/voting-app"
 
       # ---------- Copy docker-compose to VM ----------
       - name: Copy docker-compose to VM
         run: |
-          scp -i ~/.ssh/id_rsa docker-compose.prod.yml ${{ env.VM_USER }}@${{ env.VM_HOST }}:$APP_DIR/docker-compose.yml
+          scp -i ~/.ssh/id_rsa docker-compose.prod.yml azureuser@72.146.29.244:/home/azureuser/voting-app/docker-compose.yml
 
       # ---------- Deploy ----------
       - name: Deploy on VM
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.VM_USER }}@${{ env.VM_HOST }} "\
-            echo $ACR_PASSWORD | docker login $ACR_LOGIN_SERVER -u $ACR_USERNAME --password-stdin; \
-            cd $APP_DIR; \
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no azureuser@72.146.29.244 "\
+            echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin; \
+            cd /home/azureuser/voting-app; \
             docker compose pull; \
             docker compose up -d --remove-orphans; \
             docker compose ps \
