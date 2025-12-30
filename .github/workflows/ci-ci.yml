@@ -1,60 +1,37 @@
-name: CI/CD Voting App
+version: '3.8'
 
-on:
-  push:
-    branches:
-      - main
+services:
+  vote:
+    image: sadzhenitsya.azurecr.io/vote:latest
+    ports:
+      - "5000:80"
+    depends_on:
+      - redis
+      - db
 
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      # 1️⃣ Клон репозиторію
-      - name: Checkout code
-        uses: actions/checkout@v3
+  result:
+    image: sadzhenitsya.azurecr.io/result:latest
+    ports:
+      - "5001:80"
+    depends_on:
+      - db
 
-      # 2️⃣ Логін в ACR
-      - name: Login to Azure Container Registry
-        uses: azure/docker-login@v1
-        with:
-          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
-          username: ${{ secrets.AZURE_CLIENT_ID }}
-          password: ${{ secrets.AZURE_CLIENT_SECRET }}
+  worker:
+    image: sadzhenitsya.azurecr.io/worker:latest
+    depends_on:
+      - redis
+      - db
 
-      # 3️⃣ Build + Push образи (vote, result, worker)
-      - name: Build and push Docker images
-        run: |
-          for service in vote result worker; do
-            docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/$service:latest ./$service
-            docker push ${{ secrets.ACR_LOGIN_SERVER }}/$service:latest
-          done
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
 
-      # 4️⃣ Оновлення docker-compose.yml для деплою
-      - name: Update docker-compose.yml
-        run: |
-          sed -i 's|build: ./vote|image: '${{ secrets.ACR_LOGIN_SERVER }}'/vote:latest|' docker-compose.yml
-          sed -i 's|build: ./result|image: '${{ secrets.ACR_LOGIN_SERVER }}'/result:latest|' docker-compose.yml
-          sed -i 's|build: ./worker|image: '${{ secrets.ACR_LOGIN_SERVER }}'/worker:latest|' docker-compose.yml
-
-      # 5️⃣ Створення папки на VM та копіювання файлів
-      - name: Copy files to VM
-        uses: appleboy/scp-action@v0.1.5
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          source: "docker-compose.yml"
-          target: "/home/${{ secrets.VM_USER }}/voting-app/"
-
-      # 6️⃣ Деплой на VM через SSH
-      - name: Deploy to VM via SSH
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          script: |
-            mkdir -p /home/${{ secrets.VM_USER }}/voting-app
-            cd /home/${{ secrets.VM_USER }}/voting-app
-            docker compose pull
-            docker compose up -d --remove-orphans
+  db:
+    image: postgres:alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: example
+      POSTGRES_DB: votingapp
+    ports:
+      - "5432:5432"
