@@ -10,59 +10,51 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------- Checkout ----------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------- Build & Push vote ----------
+      # ---------- Build & Push образів ----------
       - name: Build and Push vote
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest ./vote
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest
 
-      # ---------- Build & Push result ----------
       - name: Build and Push result
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/result:latest ./result
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/result:latest
 
-      # ---------- Build & Push worker ----------
       - name: Build and Push worker
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest ./worker
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
 
-      # ---------- Deploy via SSH ----------
-      - name: Deploy on VM
+      # ---------- Деплой на VM ----------
+      - name: Deploy on VM via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          timeout: 600s   # Збільшено таймаут до 10 хвилин
+          timeout: 600s
           script: |
-            set -e
-
-            echo "Створюємо директорію для аплікації..."
             mkdir -p ~/voting-app
             cd ~/voting-app
 
-            echo "Оновлюємо docker-compose.yml..."
+            # ---------- Замінюємо build на image ----------
             sed -i "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" docker-compose.yml
             sed -i "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" docker-compose.yml
             sed -i "s|build: ./worker|image: ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest|" docker-compose.yml
 
-            echo "Login в ACR..."
+            # ---------- Login в ACR ----------
             echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
 
-            echo "Pull образів..."
+            # ---------- Pull + запуск ----------
             docker compose pull
-
-            echo "Запускаємо сервіси..."
             docker compose up -d --remove-orphans
 
-            echo "Перевірка запущених контейнерів..."
+            # ---------- Перевірка ----------
             docker compose ps
