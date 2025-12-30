@@ -1,9 +1,18 @@
-name: CI/CD Voting App
+name: CI-CD Voting App
 
 on:
   push:
     branches:
       - main
+
+env:
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+  ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+  VM_HOST: ${{ secrets.VM_IP }}
+  VM_USER: ${{ secrets.VM_USER }}
+  SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+  APP_DIR: /home/${{ secrets.VM_USER }}/voting-app
 
 jobs:
   build-and-deploy:
@@ -14,51 +23,59 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------- Build & Push vote ----------
+      # ---------- Login to ACR ----------
+      - name: Login to Azure Container Registry
+        run: echo "${{ env.ACR_PASSWORD }}" | docker login ${{ env.ACR_LOGIN_SERVER }} -u ${{ env.ACR_USERNAME }} --password-stdin
+
+      # ---------- Build & Push vote/result/worker ----------
       - name: Build and Push vote
         run: |
-          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest ./vote
-          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/vote:latest ./vote
+          docker push ${{ env.ACR_LOGIN_SERVER }}/vote:latest
 
-      # ---------- Build & Push result ----------
       - name: Build and Push result
         run: |
-          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/result:latest ./result
-          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/result:latest
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/result:latest ./result
+          docker push ${{ env.ACR_LOGIN_SERVER }}/result:latest
 
-      # ---------- Build & Push worker ----------
       - name: Build and Push worker
         run: |
-          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest ./worker
-          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/worker:latest ./worker
+          docker push ${{ env.ACR_LOGIN_SERVER }}/worker:latest
 
-      # ---------- Deploy на VM ----------
-      - name: Deploy on VM via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          timeout: 300s   # 5 хвилин має вистачити для швидкого pull
-          script: |
-            # Створюємо директорію, якщо її немає
-            mkdir -p ~/voting-app
-            cd ~/voting-app
-            # Замінюємо build на image для vote/result/worker
-            sed -i "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" docker-compose.yml
-            sed -i "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" docker-compose.yml
-            sed -i "s|build: ./worker|image: ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest|" docker-compose.yml
+      # ---------- Prepare docker-compose ----------
+      - name: Prepare docker-compose for production
+        run: |
+          sed -e "s|build: ./vote|image: ${{ env.ACR_LOGIN_SERVER }}/vote:latest|" \
+              -e "s|build: ./result|image: ${{ env.ACR_LOGIN_SERVER }}/result:latest|" \
+              -e "s|build: ./worker|image: ${{ env.ACR_LOGIN_SERVER }}/worker:latest|" \
+              docker-compose.yml > docker-compose.prod.yml
 
-            # Login в ACR
-            echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+      # ---------- Setup SSH ----------
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ env.VM_HOST }} >> ~/.ssh/known_hosts
 
-            # Pull тільки потрібних образів
-            docker pull ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest
-            docker pull ${{ secrets.ACR_LOGIN_SERVER }}/result:latest
-            docker pull ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
+      # ---------- Create app folder on VM ----------
+      - name: Create app directory on VM
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.VM_USER }}@${{ env.VM_HOST }} "mkdir -p $APP_DIR"
 
-            # Запуск контейнерів
-            docker compose up -d --remove-orphans
+      # ---------- Copy docker-compose to VM ----------
+      - name: Copy docker-compose to VM
+        run: |
+          scp -i ~/.ssh/id_rsa docker-compose.prod.yml ${{ env.VM_USER }}@${{ env.VM_HOST }}:$APP_DIR/docker-compose.yml
+
+      # ---------- Deploy ----------
+      - name: Deploy on VM
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.VM_USER }}@${{ env.VM_HOST }} "\
+            echo $ACR_PASSWORD | docker login $ACR_LOGIN_SERVER -u $ACR_USERNAME --password-stdin; \
+            cd $APP_DIR; \
+            docker compose pull; \
+            docker compose up -d --remove-orphans; \
+            docker compose ps \
+          "
