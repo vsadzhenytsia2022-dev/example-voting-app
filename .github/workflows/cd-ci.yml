@@ -12,6 +12,7 @@ env:
   VM_HOST: ${{ secrets.VM_HOST }}
   VM_USER: ${{ secrets.VM_USER }}
   APP_DIR: /home/${{ secrets.VM_USER }}/voting-app
+  SSH_DIR: /tmp/ssh
 
 jobs:
   build-and-deploy:
@@ -55,25 +56,25 @@ jobs:
       # ---------- Setup SSH ----------
       - name: Setup SSH
         run: |
-          mkdir -p $HOME/.ssh
-          echo "${{ secrets.VM_SSH_KEY }}" > $HOME/.ssh/id_rsa
-          chmod 600 $HOME/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.VM_HOST }} >> $HOME/.ssh/known_hosts
+          mkdir -p $SSH_DIR
+          echo "${{ secrets.VM_SSH_KEY }}" > $SSH_DIR/id_rsa
+          chmod 600 $SSH_DIR/id_rsa
+          ssh-keyscan -H ${{ secrets.VM_HOST }} >> $SSH_DIR/known_hosts
 
       # ---------- Create app folder on VM ----------
       - name: Create app directory on VM
         run: |
-          ssh -i $HOME/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} "mkdir -p $APP_DIR"
+          ssh -i $SSH_DIR/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} "mkdir -p $APP_DIR"
 
       # ---------- Copy docker-compose ----------
       - name: Copy docker-compose to VM
         run: |
-          scp -i $HOME/.ssh/id_rsa docker-compose.yml ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:$APP_DIR/docker-compose.yml
+          scp -i $SSH_DIR/id_rsa docker-compose.yml ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:$APP_DIR/docker-compose.yml
 
       # ---------- Deploy ----------
       - name: Deploy on VM
         run: |
-          ssh -i $HOME/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} " \
+          ssh -i $SSH_DIR/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} " \
             export ACR_LOGIN_SERVER=${{ secrets.ACR_LOGIN_SERVER }}; \
             export ACR_USERNAME=${{ secrets.AZURE_CLIENT_ID }}; \
             export ACR_PASSWORD=${{ secrets.AZURE_CLIENT_SECRET }}; \
