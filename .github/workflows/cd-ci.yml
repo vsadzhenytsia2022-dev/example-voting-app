@@ -10,51 +10,56 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ---------- Checkout ----------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------- Build & Push образів ----------
+      # ---------- Build & Push vote ----------
       - name: Build and Push vote
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest ./vote
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest
 
+      # ---------- Build & Push result ----------
       - name: Build and Push result
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/result:latest ./result
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/result:latest
 
+      # ---------- Build & Push worker ----------
       - name: Build and Push worker
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest ./worker
           echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
 
-      # ---------- Деплой на VM ----------
+      # ---------- Deploy на VM ----------
       - name: Deploy on VM via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          timeout: 600s
+          timeout: 300s   # 5 хвилин має вистачити для швидкого pull
           script: |
+            # Створюємо директорію, якщо її немає
             mkdir -p ~/voting-app
             cd ~/voting-app
 
-            # ---------- Замінюємо build на image ----------
+            # Замінюємо build на image для vote/result/worker
             sed -i "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" docker-compose.yml
             sed -i "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" docker-compose.yml
             sed -i "s|build: ./worker|image: ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest|" docker-compose.yml
 
-            # ---------- Login в ACR ----------
+            # Login в ACR
             echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
 
-            # ---------- Pull + запуск ----------
-            docker compose pull
-            docker compose up -d --remove-orphans
+            # Pull тільки потрібних образів
+            docker pull ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest
+            docker pull ${{ secrets.ACR_LOGIN_SERVER }}/result:latest
+            docker pull ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
 
-            # ---------- Перевірка ----------
-            docker compose ps
+            # Запуск контейнерів
+            docker compose up -d --remove-orphans
