@@ -10,30 +10,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ---------- Checkout ----------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------- Login ACR ----------
-      - name: Login to ACR
-        run: echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
-
-      # ---------- Build & Push ----------
-      - name: Build & Push vote
+      # ---------- Build & Push Docker images ----------
+      - name: Build and Push vote
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest ./vote
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest
 
-      - name: Build & Push result
+      - name: Build and Push result
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/result:latest ./result
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/result:latest
 
-      - name: Build & Push worker
+      - name: Build and Push worker
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest ./worker
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
 
-      # ---------- Deploy via SSH ----------
+      # ---------- Deploy via SSH using appleboy action ----------
       - name: Deploy on VM
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -44,16 +44,15 @@ jobs:
             mkdir -p ~/voting-app
             cd ~/voting-app
 
-            if [ ! -f docker-compose.yml ]; then
-              curl -o docker-compose.yml https://raw.githubusercontent.com/dockersamples/example-voting-app/master/docker-compose.yml
-            fi
-
+            # ---------- Prepare docker-compose ----------
             sed -i "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" docker-compose.yml
             sed -i "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" docker-compose.yml
             sed -i "s|build: ./worker|image: ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest|" docker-compose.yml
 
+            # ---------- Login to ACR ----------
             echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
 
+            # ---------- Deploy containers ----------
             docker compose pull
             docker compose up -d --remove-orphans
             docker compose ps
