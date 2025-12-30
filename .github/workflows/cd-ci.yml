@@ -55,25 +55,25 @@ jobs:
       # ---------- Setup SSH ----------
       - name: Setup SSH
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
+          mkdir -p $HOME/.ssh
+          echo "${{ secrets.VM_SSH_KEY }}" > $HOME/.ssh/id_rsa
+          chmod 600 $HOME/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VM_HOST }} >> $HOME/.ssh/known_hosts
 
       # ---------- Create app folder on VM ----------
       - name: Create app directory on VM
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} "mkdir -p $APP_DIR"
+          ssh -i $HOME/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} "mkdir -p $APP_DIR"
 
       # ---------- Copy docker-compose ----------
       - name: Copy docker-compose to VM
         run: |
-          scp -i ~/.ssh/id_rsa docker-compose.yml ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:$APP_DIR/docker-compose.yml
+          scp -i $HOME/.ssh/id_rsa docker-compose.yml ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:$APP_DIR/docker-compose.yml
 
       # ---------- Deploy ----------
       - name: Deploy on VM
         run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} " \
+          ssh -i $HOME/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} " \
             export ACR_LOGIN_SERVER=${{ secrets.ACR_LOGIN_SERVER }}; \
             export ACR_USERNAME=${{ secrets.AZURE_CLIENT_ID }}; \
             export ACR_PASSWORD=${{ secrets.AZURE_CLIENT_SECRET }}; \
