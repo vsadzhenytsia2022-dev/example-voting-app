@@ -57,7 +57,6 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ env.SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ env.VM_HOST }} >> ~/.ssh/known_hosts
 
       # ---------- Create app folder on VM ----------
       - name: Create app directory on VM
