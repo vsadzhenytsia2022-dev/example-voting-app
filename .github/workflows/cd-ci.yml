@@ -5,82 +5,55 @@ on:
     branches:
       - main
 
-env:
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-  ACR_USERNAME: ${{ secrets.AZURE_CLIENT_ID }}
-  ACR_PASSWORD: ${{ secrets.AZURE_CLIENT_SECRET }}
-  VM_HOST: ${{ secrets.VM_HOST }}
-  VM_USER: ${{ secrets.VM_USER }}
-  APP_DIR: /home/${{ secrets.VM_USER }}/voting-app
-  SSH_DIR: /tmp/ssh
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------- Checkout ----------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------- ACR Login ----------
-      - name: Login to Azure Container Registry
-        run: echo "${{ secrets.AZURE_CLIENT_SECRET }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.AZURE_CLIENT_ID }} --password-stdin
+      # ---------- Login ACR ----------
+      - name: Login to ACR
+        run: echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
 
-      # ---------- Build & Push images ----------
-      - name: Build and Push vote
+      # ---------- Build & Push ----------
+      - name: Build & Push vote
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest ./vote
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest
 
-      - name: Build and Push result
+      - name: Build & Push result
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/result:latest ./result
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/result:latest
 
-      - name: Build and Push worker
+      - name: Build & Push worker
         run: |
           docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest ./worker
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest
 
-      # ---------- Prepare docker-compose ----------
-      - name: Prepare docker-compose for deployment
-        run: |
-          sed \
-            -e "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" \
-            -e "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" \
-            -e "s|build: ./worker|image: ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest|" \
-            docker-compose.yml > docker-compose.tmp.yml
-          mv docker-compose.tmp.yml docker-compose.yml
-
-      # ---------- Setup SSH ----------
-      - name: Setup SSH
-        run: |
-          mkdir -p $SSH_DIR
-          echo "${{ secrets.VM_SSH_KEY }}" > $SSH_DIR/id_rsa
-          chmod 600 $SSH_DIR/id_rsa
-          ssh-keyscan -H ${{ secrets.VM_HOST }} >> $SSH_DIR/known_hosts
-
-      # ---------- Create app folder on VM ----------
-      - name: Create app directory on VM
-        run: |
-          ssh -i $SSH_DIR/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} "mkdir -p $APP_DIR"
-
-      # ---------- Copy docker-compose ----------
-      - name: Copy docker-compose to VM
-        run: |
-          scp -i $SSH_DIR/id_rsa docker-compose.yml ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:$APP_DIR/docker-compose.yml
-
-      # ---------- Deploy ----------
+      # ---------- Deploy via SSH ----------
       - name: Deploy on VM
-        run: |
-          ssh -i $SSH_DIR/id_rsa -o StrictHostKeyChecking=no ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} " \
-            export ACR_LOGIN_SERVER=${{ secrets.ACR_LOGIN_SERVER }}; \
-            export ACR_USERNAME=${{ secrets.AZURE_CLIENT_ID }}; \
-            export ACR_PASSWORD=${{ secrets.AZURE_CLIENT_SECRET }}; \
-            cd $APP_DIR; \
-            echo \$ACR_PASSWORD | docker login \$ACR_LOGIN_SERVER -u \$ACR_USERNAME --password-stdin; \
-            docker-compose -f docker-compose.yml pull; \
-            docker-compose -f docker-compose.yml up -d --remove-orphans; \
-            docker-compose -f docker-compose.yml ps \
-          "
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            mkdir -p ~/voting-app
+            cd ~/voting-app
+
+            if [ ! -f docker-compose.yml ]; then
+              curl -o docker-compose.yml https://raw.githubusercontent.com/dockersamples/example-voting-app/master/docker-compose.yml
+            fi
+
+            sed -i "s|build: ./vote|image: ${{ secrets.ACR_LOGIN_SERVER }}/vote:latest|" docker-compose.yml
+            sed -i "s|build: ./result|image: ${{ secrets.ACR_LOGIN_SERVER }}/result:latest|" docker-compose.yml
+            sed -i "s|build: ./worker|image: ${{ secrets.ACR_LOGIN_SERVER }}/worker:latest|" docker-compose.yml
+
+            echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker compose ps
